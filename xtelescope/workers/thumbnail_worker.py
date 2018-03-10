@@ -5,15 +5,19 @@ import threading
 import time
 from openastro.image import Image
 import shutil
+import stomp
 
 # 业务代码，因此与xtelescope有强耦合也没关系吧
 from xtelescope import config as cfg
 import xtelescope.oss
+from datetime import datetime
+import json
 
 
 class FitToThumbnail:
 
-    def __init__(self, logger_name="auto_thumbnail", bucket_name="open-luna"):
+    def __init__(self, logger_name="auto_thumbnail", bucket_name="open-luna", device_name="ALT-zsy"):
+        self.device_name = device_name
         self.cfg = cfg
         self.logger = logging.getLogger(logger_name)
 
@@ -49,6 +53,10 @@ class FitToThumbnail:
         self.logger.info(
             "Config Loaded: {}".format(self.cfg)
         )
+
+        self.conn_send = stomp.Connection10([('msg.xtelescope.net', 61613)], auto_content_length=False)
+        self.conn_send.start()
+        self.conn_send.connect([('msg.xtelescope.net', 61613)], wait=True)
 
     def walk_dirs(self, path="."):
         for root, dirs, files in os.walk(path):
@@ -86,11 +94,24 @@ class FitToThumbnail:
         # TODO: 断点续传
         # TODO: use threadings
         bucket = self.oss[self.bucket_name]
+        public_base_url = "https://" + self.bucket_name + "." + self.cfg["oss_endpoint"] + "/"
         # original fits
         bucket.put_object_from_file(
             os.path.join(self.processed_fits_path, image_name),
             image_name
         )
+        image_url = public_base_url + image_name
+        msg_to_send = {
+            "messageTime": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "msgType": "数据处理",
+            "deviceName": self.device_name,
+            "deviceColor": "#FFAA00",
+            "cameraImage": "",
+            "messageColor": "green",
+            "ossURL": image_url
+        }
+        self.conn_send.send('/topic/euipment_status', body=json.dumps(msg_to_send), headers={'type': 'textMessage'})
+
         # thumbnail
         thumbnail_name = os.path.splitext(image_name)[0] + "_thumbnail.png"
         bucket.put_object_from_file(
@@ -100,6 +121,17 @@ class FitToThumbnail:
             ),
             thumbnail_name
         )
+        image_url = public_base_url + thumbnail_name
+        msg_to_send = {
+            "messageTime": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "msgType": "预览图",
+            "deviceName": self.device_name,
+            "deviceColor": "#FFAA00",
+            "messageColor": "green",
+            "ossURL": image_url
+        }
+        self.conn_send.send('/topic/euipment_status', body=json.dumps(msg_to_send), headers={'type': 'textMessage'})
+
         thumbnail_name = os.path.splitext(image_name)[0] + "_thumbnail_center_crop.png"
         bucket.put_object_from_file(
             os.path.join(
@@ -108,6 +140,16 @@ class FitToThumbnail:
             ),
             thumbnail_name
         )
+        image_url = public_base_url + thumbnail_name
+        msg_to_send = {
+            "messageTime": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "msgType": "预览图",
+            "deviceName": self.device_name,
+            "deviceColor": "#FFAA00",
+            "messageColor": "green",
+            "ossURL": image_url
+        }
+        self.conn_send.send('/topic/euipment_status', body=json.dumps(msg_to_send), headers={'type': 'textMessage'})
 
         self.logger.info("{} processed".format(image_path))
 
